@@ -42,3 +42,7 @@ dsh plugin --profile web add file:../../packages/web-search-tavily
 - [docs/tavily-search-deployment.md](docs/tavily-search-deployment.md) — Tavily 部署记录(补丁写法、凭证配置、验证结果)
 - [docs/vision-bridge-development.md](docs/vision-bridge-development.md) — vision-bridge 开发文档(无视觉模型的图片理解桥接)
 - [AGENTS.md](AGENTS.md) — 开发规范:新增插件的结构、测试、安全、发布要求
+
+## 友情链接
+
+- [LINUX DO](https://linux.do) — 一个开放活跃的社区。
