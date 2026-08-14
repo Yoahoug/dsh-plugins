@@ -17,7 +17,6 @@ dsh-plugins/
 | 包 | 能力缝 | 角色 | 说明 |
 |---|---|---|---|
 | [`@dsh-plugins/web-search-tavily`](packages/web-search-tavily/README.md) | web (search) | Service Provider | Tavily 搜索 provider;已部署到 `~/.dsh/profiles/web`,把 agent 默认 `web_search` 后端切换为 Tavily(部署记录见 [docs/tavily-search-deployment.md](docs/tavily-search-deployment.md)) |
-| [`@dsh-plugins/message-revise`](packages/message-revise/) | web (conversation) | Command + UI | Web 消息回溯/编辑:修正已发送的用户消息(surface replace,模型从干净历史继续);开发方案见 [docs/message-revise-development.md](docs/message-revise-development.md),待开发 |
 
 ## 快速开始
 
