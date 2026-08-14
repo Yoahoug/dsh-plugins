@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output (installed profiles build from source; npm publish builds first)
+lib/
+dist/
+*.tsbuildinfo
+
+# Secrets — never commit credentials
+.env
+.env.*
+!.env.example
+*.pem
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
