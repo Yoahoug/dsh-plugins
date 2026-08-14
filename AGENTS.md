@@ -16,7 +16,7 @@ README.md  只介绍仓库功能与安装方法;开发规范一律在本文件
 - **能力缝**:插件是 Service Definition / Provider / Consumer 三角色之一;本仓库只写 **Provider**(和少量 Consumer),不写 Service Definition。
 - **Provider 不拥有 `ctx.<key>`**:注册进宿主服务的 registry(如 `ctx.web.registerSearchProvider`),key 由 Service Definition 拥有;写 Provider 时不要新增服务、不要改 `ctx` 类型。
 - **选择是配置层的**:`searchProvider` 等由配置钉死,模型不能自选,插件也不提供"默认激活"——激活由 profile 补丁 `insert` / 覆盖完成。
-- **文档先行**:新增插件前,先在 `docs/` 写调研/设计记录,再实现。
+- **文档先行,收尾同步**:新增插件前,先在 `docs/` 写调研/设计记录,再实现;**实现完成后必须把插件登记进根 `README.md` 的插件清单表**(能力缝/角色/说明 + 文档链接),并同步"相关文档"章节。未登记的插件不得提交。
 
 ## 插件包规范
 
@@ -87,7 +87,7 @@ pnpm run typecheck
 ```
 
 - 发布前:version bump、README 同步、`lib/` 重建;包名 `@dsh-plugins/<name>`,语义化版本。
-- 提交前:主仓库必须保持零改动;`git status` 只含本仓库文件。
+- 提交前:主仓库必须保持零改动;`git status` 只含本仓库文件;根 `README.md` 插件清单表已登记本次新增/变更的插件(否则视为未完成)。
 
 ## 编辑这些说明
 
