@@ -6,6 +6,7 @@ export default defineConfig({
     alias: {
       '@dsh-plugins/web-search-tavily': new URL('./packages/web-search-tavily/src/index.ts', import.meta.url).pathname,
       '@dsh-plugins/vision-bridge': new URL('./packages/vision-bridge/src/index.ts', import.meta.url).pathname,
+      '@dsh-plugins/skill-external-roots': new URL('./packages/skill-external-roots/src/index.ts', import.meta.url).pathname,
     },
   },
   test: {
