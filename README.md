@@ -19,6 +19,7 @@ dsh-plugins/
 | [`@dsh-plugins/web-search-tavily`](packages/web-search-tavily/README.md) | web (search) | Service Provider | Tavily 搜索 provider;已部署到 `~/.dsh/profiles/web`,把 agent 默认 `web_search` 后端切换为 Tavily(部署记录见 [docs/tavily-search-deployment.md](docs/tavily-search-deployment.md)) |
 | [`@dsh-plugins/vision-bridge`](packages/vision-bridge/README.zh.md) | llm/stream (waterfall) | Consumer | 给无视觉模型桥接图片理解:在 `llm/stream` 层把用户上传图片改写为提示文本,经 OpenAI 兼容视觉端点(`gemini-3.6-flash`)转成描述交给模型;工具 `describe_image`,多模态模型默认不暴露(开发记录见 [docs/vision-bridge-development.md](docs/vision-bridge-development.md)) |
 | [`@dsh-plugins/skill-external-roots`](packages/skill-external-roots/README.md) | skills (registry provider) | Service Provider | 把本机 codex / claude / cursor / opencode 工具目录里的既有技能挂进 `ctx.skills`(`source=external`、rank 350),模型可直接 `skill()` 调用;chokidar 实时刷新;支持启动器注入控制(按技能开关,关闭即不注入;实际注入清单回写 `skills-active.json`),详见包内 README(开发与部署记录见 [docs/skill-external-roots-development.md](docs/skill-external-roots-development.md)) |
+| [`@dsh-plugins/session-archive-restore`](packages/session-archive-restore/README.zh.md) | webServer + storageDomain + sessionPersistence | Consumer | 为 dsh-launcher 提供本地归档会话热恢复与永久删除接口;删除同步清理工作区引用、projection cache 和 JSONL 会话日志 |
 
 ## 快速开始
 
@@ -43,6 +44,7 @@ dsh plugin --profile web add file:../../packages/web-search-tavily
 - [docs/tavily-search-deployment.md](docs/tavily-search-deployment.md) — Tavily 部署记录(补丁写法、凭证配置、验证结果)
 - [docs/vision-bridge-development.md](docs/vision-bridge-development.md) — vision-bridge 开发文档(无视觉模型的图片理解桥接)
 - [docs/skill-external-roots-development.md](docs/skill-external-roots-development.md) — skill-external-roots 开发与部署记录(外部工具技能挂载、实测结果)
+- [docs/session-archive-restore-development.md](docs/session-archive-restore-development.md) — session-archive-restore 归档会话恢复、永久删除设计与部署记录
 - [AGENTS.md](AGENTS.md) — 开发规范:新增插件的结构、测试、安全、发布要求
 
 ## 友情链接

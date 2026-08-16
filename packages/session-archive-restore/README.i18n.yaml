@@ -1,0 +1,2 @@
+name: session-archive-restore
+description: Adds local hot endpoints for restoring and permanently deleting archived DSH sessions.
