@@ -29,8 +29,10 @@
 | `rank` | `350` | 候选项 rank；项目(100/200) < 外部 < 用户(400/500)。 |
 | `exclude` | `[]` | 按解析出的 frontmatter `name` 从目录中剔除的技能名。 |
 | `watch` | `true` | chokidar 在根目录直属变化（增删技能、`SKILL.md` 修改）时使注册表失效。 |
+| `skillControlFile` | 未配置 | 启动器写入的**按技能注入控制文件**（`$DSH_HOME/skills-control.json`）：`roots` 里 `false` 的族不探测、`skills` 里 `false` 的技能不挂载；文件变化即 `invalidate()`（**运行中 dsh 无需重启**）。未配置 = v1 行为（全注入、无文件 IO）。 |
+| `activeFile` | 未配置 | 每次 `list()` 后把**实际注入（过滤后）的候选清单**原子写回该文件（`$DSH_HOME/state/skills-active.json`）——启动器「已启动」子界面的数据源；内容未变不重写。 |
 
-补丁行（profile `cordis.patch.yml`）：
+补丁行（profile `cordis.patch.yml`，含启动器注入控制联动）：
 
 ```yaml
 - insert:
@@ -42,7 +44,21 @@
           claude: true
           cursor: true
           opencode: true
+        skillControlFile: /Users/you/.dsh/skills-control.json
+        activeFile: /Users/you/.dsh/state/skills-active.json
 ```
+
+控制文件（`$DSH_HOME/skills-control.json`，由 dsh-launcher 技能页开关维护，也可手写）语义：
+
+```json
+{ "version": 1,
+  "roots": { "codex": true, "claude": true, "cursor": true, "opencode": true },
+  "skills": { "tavily-extract": true, "win-host": false } }
+```
+
+- `roots.<family> = false` → 该族整根不探测（与 Config `enabled` 取与）；
+- `skills.<name> = false` → 该技能不挂载（与 Config `exclude` 合并）；
+- 缺失文件 / 缺失字段 = 启用（v1 行为）；文件变化由 1.5s 轮询感知并 `invalidate()` → **关闭一个技能后运行中的 dsh 一两秒内即不再注入**。
 
 安装：`dsh plugin --profile web add file:<绝对路径>/packages/skill-external-roots`（`file:` 安装无需 pnpm `allowBuilds` 授权；先 `pnpm run build` 产出 `lib/`）。
 

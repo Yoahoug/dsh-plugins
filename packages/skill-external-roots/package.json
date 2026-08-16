@@ -1,7 +1,7 @@
 {
   "name": "@dsh-plugins/skill-external-roots",
   "description": "Mounts skills from external agent tool roots (codex / claude / cursor / opencode) into the ctx.skills registry as source=external candidates",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publishConfig": {
     "access": "public"
   },

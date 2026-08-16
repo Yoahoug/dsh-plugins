@@ -18,7 +18,7 @@ dsh-plugins/
 |---|---|---|---|
 | [`@dsh-plugins/web-search-tavily`](packages/web-search-tavily/README.md) | web (search) | Service Provider | Tavily 搜索 provider;已部署到 `~/.dsh/profiles/web`,把 agent 默认 `web_search` 后端切换为 Tavily(部署记录见 [docs/tavily-search-deployment.md](docs/tavily-search-deployment.md)) |
 | [`@dsh-plugins/vision-bridge`](packages/vision-bridge/README.zh.md) | llm/stream (waterfall) | Consumer | 给无视觉模型桥接图片理解:在 `llm/stream` 层把用户上传图片改写为提示文本,经 OpenAI 兼容视觉端点(`gemini-3.6-flash`)转成描述交给模型;工具 `describe_image`,多模态模型默认不暴露(开发记录见 [docs/vision-bridge-development.md](docs/vision-bridge-development.md)) |
-| [`@dsh-plugins/skill-external-roots`](packages/skill-external-roots/README.md) | skills (registry provider) | Service Provider | 把本机 codex / claude / cursor / opencode 工具目录里的既有技能挂进 `ctx.skills`(`source=external`、rank 350),模型可直接 `skill()` 调用;chokidar 实时刷新(开发与部署记录见 [docs/skill-external-roots-development.md](docs/skill-external-roots-development.md)) |
+| [`@dsh-plugins/skill-external-roots`](packages/skill-external-roots/README.md) | skills (registry provider) | Service Provider | 把本机 codex / claude / cursor / opencode 工具目录里的既有技能挂进 `ctx.skills`(`source=external`、rank 350),模型可直接 `skill()` 调用;chokidar 实时刷新;支持启动器注入控制(按技能开关,关闭即不注入;实际注入清单回写 `skills-active.json`),详见包内 README(开发与部署记录见 [docs/skill-external-roots-development.md](docs/skill-external-roots-development.md)) |
 
 ## 快速开始
 

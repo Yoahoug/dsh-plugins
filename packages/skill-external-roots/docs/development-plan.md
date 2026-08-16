@@ -210,3 +210,36 @@ packages/skill-external-roots/
 | chokidar 大目录开销 | 沿用官方 stability/poll 参数；`watch: false` 逃生口 |
 | peer 依赖版本漂移（dsh rc 线更新） | 跟随 web-search-tavily 的 `^0.1.0-rc.6` 线，发布前统一核对 |
 | 启动器扫描与插件根列表不一致 | 两者共用同一份“默认根映射”（本插件 Config 默认值 + 启动器设置项），联调时互相对齐并各自文档化 |
+
+---
+
+## 10. v0.2 追加:启动器注入控制(2026 实现回写)
+
+原 v1「一键启用」走 skill-filesystem `customSkillDirs`,但 dsh web 的 profile 中 `skill-filesystem` 被
+bundle 层停用,该路径不生效;同时 v1 全量注入 codex/claude/cursor/opencode 四族技能,用户无法精准
+控制哪些技能进入模型。v0.2 引入**按技能注入控制**,与 dsh-launcher 技能子界面联动:
+
+### 10.1 机制
+
+- 新增 Config:`skillControlFile`(启动器写入的注入控制文件,`$DSH_HOME/skills-control.json`)与
+  `activeFile`(实际注入清单回写,`$DSH_HOME/state/skills-active.json`);两者未配置时完全保持 v1 行为
+  (零文件 IO、零 watch)。
+- 控制文件:`{ version: 1, roots: {codex|claude|cursor|opencode: bool}, skills: {<name>: bool} }`;
+  缺失文件/缺失字段 = 启用。`list()` 时 mtime 缓存读取;`roots.<family>=false` 与 Config `enabled`
+  取与(整族不探测),`skills.<name>=false` 与 Config `exclude` 合并(按 frontmatter name 剔除)。
+- 热更新:构造时对控制文件 `fs.watchFile`(1.5s 轮询),变化 → 清缓存 + `control.invalidate()` →
+  运行中 dsh 重新收集,关闭的技能一两秒内不再注入,**无需重启**。
+- active 回写:每次 `list()` 后把过滤后候选(name/description/whenToUse/source/root/path/invocation)
+  原子写(temp+rename)到 active 文件,内容未变不重写;失败仅记日志,不影响目录。
+- 测试:控制文件过滤(技能/族两级)、active 回写内容与去重、控制文件变化触发 invalidate、
+  缺失文件降级 v1,共 4 例新增(包内 34 例全绿);全部 144 例仓库测试绿。
+
+### 10.2 与 dsh-launcher 的约定(双向)
+
+| 项 | 约定 |
+|---|---|
+| 控制文件路径 | `$DSH_HOME/skills-control.json`(launcher 写,插件读) |
+| active 清单路径 | `$DSH_HOME/state/skills-active.json`(插件写,launcher 读) |
+| 开关语义 | `false` = 不注入;启动器技能页开关经 Tauri IPC 原子写控制文件 |
+| 部署 | profile 补丁需在 skill-external-roots 行显式配置 `skillControlFile`/`activeFile`;launcher 提供「启用注入控制」一键写入该补丁(整行重述 + dump-config 校验) |
+| 剩余事项 | 插件未配置控制文件时,launcher「已启动」子界面提示「未启用注入控制」并引导一键启用 |

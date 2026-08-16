@@ -29,8 +29,22 @@ Non-existent roots are silently skipped. `customDirs` appends arbitrary roots (a
 | `rank` | `350` | Candidate rank; project (100/200) < external < user (400/500). |
 | `exclude` | `[]` | Skill names dropped from the catalog by parsed frontmatter `name`. |
 | `watch` | `true` | Chokidar invalidates the registry on direct-root changes (add/remove of a skill, `SKILL.md` edits). |
+| `skillControlFile` | unset | Launcher-written per-skill injection control file (`$DSH_HOME/skills-control.json`): families with `roots.* = false` and skills with `skills.<name> = false` are not mounted; a file change calls `invalidate()` (**live on a running dsh, no restart**). Unset = v1 behavior (inject everything, no file IO). |
+| `activeFile` | unset | After every `list()` the post-filter (actually injected) candidate list is atomically written here (`$DSH_HOME/state/skills-active.json`) — the launcher's 已启动 tab data source; unchanged content is not rewritten. |
 
-Patch line (profile `cordis.patch.yml`):
+Control file (`$DSH_HOME/skills-control.json`, maintained by the dsh-launcher skills page switches, or hand-written) semantics:
+
+```json
+{ "version": 1,
+  "roots": { "codex": true, "claude": true, "cursor": true, "opencode": true },
+  "skills": { "tavily-extract": true, "win-host": false } }
+```
+
+- `roots.<family> = false` → the whole family is not probed (ANDed with Config `enabled`);
+- `skills.<name> = false` → that skill is not mounted (merged with Config `exclude`);
+- missing file / missing field = enabled (v1 behavior); changes are detected by a 1.5s poll that calls `invalidate()` — toggling a skill off stops injection on a running dsh within a second or two.
+
+Patch line (profile `cordis.patch.yml`, with launcher injection-control wiring):
 
 ```yaml
 - insert:
@@ -42,6 +56,8 @@ Patch line (profile `cordis.patch.yml`):
           claude: true
           cursor: true
           opencode: true
+        skillControlFile: /Users/you/.dsh/skills-control.json
+        activeFile: /Users/you/.dsh/state/skills-active.json
 ```
 
 Install: `dsh plugin --profile web add file:<abs path>/packages/skill-external-roots` (a `file:` install needs no pnpm `allowBuilds` grant; run `pnpm run build` first so `lib/` exists).

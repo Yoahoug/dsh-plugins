@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -441,5 +441,87 @@ describe('checkExternalRootsHealth (package invariant)', () => {
     health.record({ root: '/root', exists: true, candidates: ['/outside/SKILL.md'], scannedAt: 2 })
     expect(() => ctx.emit('skills/change')).toThrow(/outside its recorded root/)
     await ctx.fiber.dispose()
+  })
+})
+
+describe('launcher skill injection control (v0.2)', () => {
+  it('drops skills disabled in the control file and reports only the filtered list', async () => {
+    const root = await makeTree()
+    const base = await mkdtemp(join(tmpdir(), 'skill-ext-control-'))
+    tempRoots.push(base)
+    const controlFile = join(base, 'skills-control.json')
+    const activeFile = join(base, 'state', 'skills-active.json')
+    await writeFile(controlFile, JSON.stringify({ version: 1, skills: { alpha: false } }, null, 2))
+    const { provider } = await makeProvider({ customDirs: [root], skillControlFile: controlFile, activeFile })
+    const list = await provider.list({})
+    const candidates = Array.isArray(list) ? list : list.candidates
+    expect(candidates.map(candidate => candidate.name)).toEqual(['beta'])
+    // active 清单只含过滤后的候选,并带来源根与路径
+    const active = JSON.parse(await readFile(activeFile, 'utf8')) as {
+      version: number
+      skills: Array<{ name: string; root: string; path: string; modelInvocable: boolean }>
+    }
+    expect(active.version).toBe(1)
+    expect(active.skills.map(s => s.name)).toEqual(['beta'])
+    expect(active.skills[0]?.root).toBe(root)
+    expect(active.skills[0]?.path).toBe(join(root, 'beta.md'))
+    expect(active.skills[0]?.modelInvocable).toBe(true)
+    // 控制文件重开 alpha → 新实例读到并注入
+    await writeFile(controlFile, JSON.stringify({ version: 1, skills: { alpha: true } }, null, 2))
+    const { provider: p2 } = await makeProvider({ customDirs: [root], skillControlFile: controlFile, activeFile })
+    const list2 = await p2.list({})
+    const candidates2 = Array.isArray(list2) ? list2 : list2.candidates
+    expect(candidates2.map(candidate => candidate.name)).toEqual(['alpha', 'beta'])
+  })
+
+  it('a family disabled in the control file drops its whole root', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'skill-ext-family-'))
+    tempRoots.push(base)
+    const home = join(base, 'home')
+    await mkdir(join(home, '.codex', 'skills', 'codex-skill'), { recursive: true })
+    await writeFile(
+      join(home, '.codex', 'skills', 'codex-skill', 'SKILL.md'),
+      '---\nname: codex-skill\ndescription: c\n---\nbody',
+    )
+    const controlFile = join(base, 'skills-control.json')
+    await writeFile(controlFile, JSON.stringify({ version: 1, roots: { codex: false } }, null, 2))
+    const enabled = { codex: true, claude: false, cursor: false, opencode: false }
+    const { provider } = await makeProvider({ home, enabled, skillControlFile: controlFile })
+    const list = await provider.list({})
+    const candidates = Array.isArray(list) ? list : list.candidates
+    expect(candidates).toEqual([])
+    // 无控制文件 → v1 行为:全注入
+    const { provider: p2 } = await makeProvider({ home, enabled })
+    const list2 = await p2.list({})
+    const candidates2 = Array.isArray(list2) ? list2 : list2.candidates
+    expect(candidates2.map(candidate => candidate.name)).toEqual(['codex-skill'])
+  })
+
+  it('a control file change invalidates the catalog (HMR, no restart)', async () => {
+    const root = await makeTree()
+    const base = await mkdtemp(join(tmpdir(), 'skill-ext-watch-'))
+    tempRoots.push(base)
+    const controlFile = join(base, 'skills-control.json')
+    await writeFile(controlFile, JSON.stringify({ version: 1, skills: { alpha: false } }, null, 2))
+    const { provider, invalidate } = await makeProvider({ customDirs: [root], skillControlFile: controlFile })
+    await provider.list({})
+    expect(invalidate).not.toHaveBeenCalled()
+    await writeFile(controlFile, JSON.stringify({ version: 1, skills: { alpha: true } }, null, 2))
+    // fs.watchFile polls at CONTROL_WATCH_INTERVAL_MS (1.5s)
+    await new Promise(resolve => setTimeout(resolve, 2400))
+    expect(invalidate).toHaveBeenCalled()
+    await provider.dispose()
+  })
+
+  it('a missing control file degrades to v1 behavior without IO failures', async () => {
+    const root = await makeTree()
+    const base = await mkdtemp(join(tmpdir(), 'skill-ext-missing-'))
+    tempRoots.push(base)
+    const controlFile = join(base, 'never-written.json')
+    const { provider } = await makeProvider({ customDirs: [root], skillControlFile: controlFile })
+    const list = await provider.list({})
+    const candidates = Array.isArray(list) ? list : list.candidates
+    expect(candidates.map(candidate => candidate.name)).toEqual(['alpha', 'beta'])
+    await provider.dispose()
   })
 })

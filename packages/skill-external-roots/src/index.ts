@@ -67,6 +67,19 @@ export interface Config {
   exclude?: string[]
   /** Whether chokidar invalidates the registry on root-directory changes. Defaults to `true`. */
   watch?: boolean
+  /**
+   * Launcher-written per-skill injection control file
+   * (`$DSH_HOME/skills-control.json`): families/skills with `false` are not
+   * mounted; changes invalidate the catalog (HMR, no restart). Unset = v1
+   * behavior (everything enabled, no control-file IO/watch).
+   */
+  skillControlFile?: string
+  /**
+   * Where the provider writes its actually-registered (post-filter) candidate
+   * list after every `list()` (`$DSH_HOME/state/skills-active.json`) — the
+   * "已启动" view of the launcher. Unset = no reporting.
+   */
+  activeFile?: string
 }
 
 export const Config: z<Config> = z.object({
@@ -82,6 +95,8 @@ export const Config: z<Config> = z.object({
   rank: z.number().step(1).min(0).default(EXTERNAL_ROOTS_DEFAULT_RANK),
   exclude: z.array(z.string()).default([]),
   watch: z.boolean().default(true),
+  skillControlFile: z.string(),
+  activeFile: z.string(),
 })
 
 /**
@@ -106,6 +121,9 @@ function resolveOptions(config: Config): ExternalRootsProviderOptions {
     rank: config.rank ?? EXTERNAL_ROOTS_DEFAULT_RANK,
     exclude: config.exclude ?? [],
     watch: config.watch ?? true,
+    // 空串视为未配置(schemastery 无 optional;显式空串 = 关闭该功能)
+    ...(config.skillControlFile ? { skillControlFile: config.skillControlFile } : {}),
+    ...(config.activeFile ? { activeFile: config.activeFile } : {}),
   }
 }
 

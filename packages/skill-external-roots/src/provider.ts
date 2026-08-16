@@ -18,7 +18,7 @@
  * @module @dsh-plugins/skill-external-roots/provider
  */
 
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { unwatchFile, watchFile } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { homedir } from 'node:os'
@@ -79,6 +79,23 @@ export interface ExternalRootsProviderOptions {
   readonly exclude: readonly string[]
   /** Whether chokidar invalidates the registry on root-directory changes. */
   readonly watch: boolean
+  /**
+   * Optional per-skill control file written by the launcher
+   * (`{ "version": 1, "roots": {...}, "skills": { "<name>": true|false } }`).
+   * When set, the provider re-reads it on every `list()` (mtime-cached), drops
+   * families whose `roots` flag is `false` and skills whose `skills` flag is
+   * `false`, and invalidates the catalog when the file changes — so toggling a
+   * skill off takes effect on a running dsh without a restart. When unset the
+   * provider behaves exactly like v1 (no file IO, no control watch).
+   */
+  readonly skillControlFile?: string
+  /**
+   * Optional path the provider writes its actually-registered (post-filter)
+   * candidate list to after every `list()` — the "what is injected right now"
+   * view the launcher's 已启动 tab reads. Writes are content-deduped and
+   * atomic (temp + rename); failures only log. When unset, no reporting.
+   */
+  readonly activeFile?: string
   /** Home directory used to resolve default roots; defaults to `os.homedir()`. */
   readonly home?: string
   /** Agents home used for `agentsRoot`; defaults to `$DSH_AGENTS_HOME` or `~/.agents`. */
@@ -96,6 +113,28 @@ export interface ExternalRootCandidate {
   readonly path: string
   readonly exists: boolean
 }
+
+/**
+ * Launcher-written per-skill injection control state (v1). The provider only
+ * mounts families and skills that are enabled here; a missing file or field
+ * means "enabled" (v1 behavior). Written atomically by the launcher as
+ * `$DSH_HOME/skills-control.json`.
+ */
+export interface SkillControlState {
+  readonly version?: number
+  /** Per-tool family switches; `false` drops the whole family from probing. */
+  readonly roots?: {
+    readonly codex?: boolean
+    readonly claude?: boolean
+    readonly cursor?: boolean
+    readonly opencode?: boolean
+  }
+  /** Per-skill injection switches; `false` drops that skill from the catalog. */
+  readonly skills?: Readonly<Record<string, boolean>>
+}
+
+/** Milliseconds between control-file mtime polls (toggle → HMR latency). */
+const CONTROL_WATCH_INTERVAL_MS = 1500
 
 /** A skill fully parsed from frontmatter plus body. */
 export interface ParsedSkill {
@@ -254,6 +293,9 @@ export class ExternalRootsProvider implements SkillProvider {
   private readonly agentsHome: string
   private readonly watchManager: ExternalRootsWatchManager
   private disposal: Promise<void> | undefined
+  private controlCache: { mtimeNs: bigint; state: SkillControlState } | undefined
+  private lastActiveJson: string | undefined
+  private controlWatchListener: (() => void) | undefined
 
   constructor(
     private readonly ctx: Context,
@@ -270,6 +312,18 @@ export class ExternalRootsProvider implements SkillProvider {
       stabilityThresholdMs: options.watchStabilityThresholdMs ?? DEFAULT_WATCH_STABILITY_THRESHOLD_MS,
       pollIntervalMs: options.watchPollIntervalMs ?? DEFAULT_WATCH_POLL_INTERVAL_MS,
     })
+    if (options.skillControlFile !== undefined) {
+      // Toggle file changes invalidate the catalog: the next collect re-reads
+      // the control state, so closing a skill takes effect without a restart.
+      this.controlWatchListener = () => {
+        this.controlCache = undefined
+        control.invalidate()
+      }
+      watchFile(options.skillControlFile, {
+        persistent: false,
+        interval: CONTROL_WATCH_INTERVAL_MS,
+      }, this.controlWatchListener)
+    }
     control.signal.addEventListener('abort', () => { void this.dispose() }, { once: true })
   }
 
@@ -277,12 +331,19 @@ export class ExternalRootsProvider implements SkillProvider {
    * Discover external skills for the enabled, existing roots. Non-existent
    * roots are skipped silently; a root that exists but cannot be scanned
    * marks the observation incomplete so the registry keeps last-good state.
+   * Families/skills disabled in the control file are dropped here, and the
+   * post-filter candidate list is reported to the active file (if configured).
    * @param options - lookup options whose signal cancels filesystem reads.
    * @returns candidates, or an explicit incomplete observation.
    */
   async list(options: SkillLookupOptions): Promise<SkillCandidate[] | SkillProviderObservation> {
     options.signal?.throwIfAborted()
-    const roots = await this.resolveRoots()
+    const control = await this.readControlState()
+    const disabled = new Set<string>(this.options.exclude)
+    for (const [name, on] of Object.entries(control.skills ?? {})) {
+      if (on === false) disabled.add(name)
+    }
+    const roots = await this.resolveRoots(control)
     let complete = true
     try {
       await this.watchManager.observe(roots)
@@ -291,6 +352,7 @@ export class ExternalRootsProvider implements SkillProvider {
       complete = false
     }
     const candidates: SkillCandidate[] = []
+    const rootsByCandidate = new Map<string, string>()
     const scannedAt = Date.now()
     for (const root of roots) {
       if (!root.exists) {
@@ -298,15 +360,17 @@ export class ExternalRootsProvider implements SkillProvider {
         continue
       }
       try {
-        const scanned = await this.scanRoot(root.path, options.signal)
+        const scanned = await this.scanRoot(root.path, options.signal, disabled)
         this.health.record({ root: root.path, exists: true, candidates: scanned.candidatePaths, scannedAt })
         candidates.push(...scanned.candidates)
+        for (const candidate of scanned.candidates) rootsByCandidate.set(candidate.name, root.path)
       } catch (error) {
         this.ctx.logger.warn(`skill-external-roots: failed to scan root ${root.path}: ${errorMessage(error)}`)
         complete = false
         this.health.record({ root: root.path, exists: true, candidates: [], scannedAt })
       }
     }
+    await this.reportActive(candidates, rootsByCandidate)
     return complete ? candidates : { candidates, complete }
   }
 
@@ -354,15 +418,25 @@ export class ExternalRootsProvider implements SkillProvider {
    * @returns a shared promise settling when every watcher is closed.
    */
   dispose(): Promise<void> {
+    if (this.controlWatchListener !== undefined && this.options.skillControlFile !== undefined) {
+      unwatchFile(this.options.skillControlFile, this.controlWatchListener)
+      this.controlWatchListener = undefined
+    }
     this.disposal ??= this.watchManager.dispose()
     return this.disposal
   }
 
-  private async resolveRoots(): Promise<ExternalRootCandidate[]> {
+  private async resolveRoots(control: SkillControlState): Promise<ExternalRootCandidate[]> {
+    // Config switches AND the control file's per-family switches must allow.
     const paths = defaultRootCandidates(
       this.home,
       this.agentsHome,
-      this.options.enabled,
+      {
+        codex: this.options.enabled.codex && (control.roots?.codex ?? true),
+        claude: this.options.enabled.claude && (control.roots?.claude ?? true),
+        cursor: this.options.enabled.cursor && (control.roots?.cursor ?? true),
+        opencode: this.options.enabled.opencode && (control.roots?.opencode ?? true),
+      },
       this.options.agentsRoot,
       this.options.customDirs,
     )
@@ -380,9 +454,72 @@ export class ExternalRootsProvider implements SkillProvider {
     return roots
   }
 
+  /**
+   * Read the launcher's injection control file (mtime-cached). A missing or
+   * malformed file degrades to "everything enabled" (v1 behavior).
+   */
+  private async readControlState(): Promise<SkillControlState> {
+    const file = this.options.skillControlFile
+    if (file === undefined) return {}
+    try {
+      const info = await stat(file, { bigint: true })
+      if (this.controlCache !== undefined && this.controlCache.mtimeNs === info.mtimeNs) {
+        return this.controlCache.state
+      }
+      const raw = await readFile(file, { encoding: 'utf8' })
+      const parsed = JSON.parse(raw) as unknown
+      const state = typeof parsed === 'object' && parsed !== null
+        ? parsed as SkillControlState
+        : {}
+      this.controlCache = { mtimeNs: info.mtimeNs, state }
+      return state
+    } catch (error) {
+      if (isAbsentPathError(error)) {
+        this.controlCache = { mtimeNs: 0n, state: {} }
+        return {}
+      }
+      this.ctx.logger.warn(`skill-external-roots: failed to read control file ${file}: ${errorMessage(error)}`)
+      return {}
+    }
+  }
+
+  /**
+   * Write the post-filter candidate list to the active file (content-deduped,
+   * atomic). Failures only log — the catalog must never depend on reporting.
+   */
+  private async reportActive(
+    candidates: readonly SkillCandidate[],
+    rootsByCandidate: ReadonlyMap<string, string>,
+  ): Promise<void> {
+    const file = this.options.activeFile
+    if (file === undefined) return
+    const skills = candidates.map((candidate) => ({
+      name: candidate.name,
+      description: candidate.description,
+      ...(candidate.whenToUse !== undefined ? { whenToUse: candidate.whenToUse } : {}),
+      source: EXTERNAL_SOURCE,
+      root: rootsByCandidate.get(candidate.name) ?? '',
+      path: candidate.path ?? '',
+      modelInvocable: candidate.invocation.modelInvocable,
+      userInvocable: candidate.invocation.userInvocable,
+    }))
+    const json = `${JSON.stringify({ version: 1, writtenAt: Date.now(), skills }, null, 2)}\n`
+    if (json === this.lastActiveJson) return
+    this.lastActiveJson = json
+    try {
+      await mkdir(dirname(file), { recursive: true })
+      const tmp = `${file}.tmp`
+      await writeFile(tmp, json, { encoding: 'utf8' })
+      await rename(tmp, file)
+    } catch (error) {
+      this.ctx.logger.warn(`skill-external-roots: failed to write active file ${file}: ${errorMessage(error)}`)
+    }
+  }
+
   private async scanRoot(
     root: string,
     signal: AbortSignal | undefined,
+    disabled: ReadonlySet<string>,
   ): Promise<{ candidates: SkillCandidate[]; candidatePaths: string[] }> {
     signal?.throwIfAborted()
     let entries: Dirent[]
@@ -423,7 +560,7 @@ export class ExternalRootsProvider implements SkillProvider {
         continue
       }
       const skill = outcome.skill
-      if (this.options.exclude.includes(skill.name)) continue
+      if (disabled.has(skill.name)) continue
       candidates.push({
         name: skill.name,
         description: skill.description,
